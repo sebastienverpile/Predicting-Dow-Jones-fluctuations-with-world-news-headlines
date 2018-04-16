@@ -1,0 +1,184 @@
+###################################Capstone project#############################
+
+#######################Importing Data###############
+import pandas as pd
+location = 'C:/Users/Sebastien Verpile/Desktop/Capstone/News_delta_DJIA.csv'
+df = pd.read_csv(location) 
+
+#Libraries
+import seaborn as sns
+import string
+from nltk.corpus import stopwords
+from nltk.stem.snowball import SnowballStemmer
+
+#Function for removing punctuations
+def news_process(news):
+    '''
+    this function takes news as an argument,then remove all the punctuation marks and 
+    all the stop words in the news, finally return a list of words.
+    '''
+    if isinstance(news,str):
+        news = news.strip('b')
+        news = [c for c in news if c not in string.punctuation]
+        news = ''.join(news)
+        return news
+    else:
+        return ''
+
+#Merging all headlines
+headlines = []
+for row in range(0,len(df.index)):
+    headlines.append(' '.join(news_process(news) for news in df.iloc[row,2:27]))
+df['headlines'] = headlines
+
+#Creating class(e.g. Positive or Negatie)
+change = []
+for i in df.delta:
+    c=''
+    if i <= 0:
+        c = 'Down'
+    elif i > 0:
+        c = 'Up'
+        
+    change.append(c)
+
+data = df.assign(change=change)
+
+
+# This is for setting the theme of the graph
+sns.set(style="darkgrid")
+sns.countplot(x='change',data=data) #Plot to get counts for each class
+
+
+#New data frame with important attributes only
+finaldf = data[['headlines','change']]
+
+
+#Function to remove stop words and perform stemming
+def clean_news(news):
+    stemmer = SnowballStemmer("english", ignore_stopwords=True)    
+    clean_news = [stemmer.stem(word) for word in news.split() if word.lower() not in stopwords.words('english')]
+    return clean_news
+
+#Creating new variable with tokens
+finaldf['headlines_tokens'] = finaldf['headlines'].apply(clean_news)
+
+
+#Library word count, weighing counts, and normalizing count vector
+from sklearn.feature_extraction.text import CountVectorizer
+
+###Extracting important words####
+bow_transformer = CountVectorizer(analyzer=clean_news).fit(finaldf['headlines'])
+# Print total number of vocab words
+print(len(bow_transformer.vocabulary_))
+
+
+#Transforming entire data frame into bag of words
+headlines_bow = bow_transformer.transform(finaldf['headlines'])
+print('Shape of Sparse Matrix: ', headlines_bow.shape)
+print('Amount of Non-Zero occurences: ', headlines_bow.nnz)
+
+
+#Calculating Tf-Idf scores for entire data frame
+from sklearn.feature_extraction.text import TfidfTransformer
+tfidf_transformer = TfidfTransformer().fit(headlines_bow)
+headlines_tfidf = tfidf_transformer.transform(headlines_bow)
+print(headlines_tfidf.shape)
+
+
+###################### Implementive Naive Bayes Classifier #########################
+
+#split
+train = headline_train = finaldf.sample(round(0.90 * len(finaldf)), replace=True)
+test = finaldf.drop(train.index)
+
+ 
+
+#Multinomial Naive Bayes  
+
+from sklearn.pipeline import Pipeline
+from sklearn.naive_bayes import MultinomialNB
+pipeline = Pipeline([
+    ('bow', CountVectorizer(analyzer=clean_news)),  # strings to token integer counts
+    ('tfidf', TfidfTransformer()),  # integer counts to weighted TF-IDF scores
+    ('classifier', MultinomialNB()),  # train on TF-IDF vectors w/ Naive Bayes classifier
+])
+
+
+pipeline.fit(train['headlines'],train['change'])
+
+predictions = pipeline.predict(test['headlines'])
+
+from sklearn.metrics import classification_report
+print(classification_report(test['change'],predictions))
+
+#Accuracy metric 
+from sklearn import metrics 
+metrics.accuracy_score(predictions,test['change'])
+
+
+
+#Gaussian Naive bayes
+class DenseTransformer(TfidfTransformer):
+
+    def transform(self, X, y=None, **fit_params):
+        return X.todense()
+
+    def fit_transform(self, X, y=None, **fit_params):
+        self.fit(X, y, **fit_params)
+        return self.transform(X)
+
+    def fit(self, X, y=None, **fit_params):
+        return self
+
+
+from sklearn.pipeline import Pipeline
+from sklearn.naive_bayes import GaussianNB
+pipeline = Pipeline([
+    ('bow', CountVectorizer(analyzer=clean_news)),  # strings to token integer counts
+    ('tfidf', TfidfTransformer()),# integer counts to weighted TF-IDF scores
+    ('to_dense', DenseTransformer()),
+    ('classifier', GaussianNB()),  # train on TF-IDF vectors w/ Naive Bayes classifier
+])
+
+
+
+pipeline.fit(train['headlines'],train['change'])
+
+predictions = pipeline.predict(test['headlines'])
+
+from sklearn.metrics import classification_report
+print(classification_report(test['change'],predictions))
+
+
+#Accuracy metric 
+from sklearn import metrics 
+metrics.accuracy_score(predictions,test['change'])
+
+
+
+
+
+#Bernoulli Naive Bayes 
+
+from sklearn.naive_bayes import BernoulliNB
+bernoulli_pipeline = Pipeline([
+    ('bow', CountVectorizer(ngram_range=(1,2),analyzer=clean_news)),  # strings to token integer counts
+    ('tfidf', TfidfTransformer()),  # integer counts to weighted TF-IDF scores
+    ('classifier', BernoulliNB(alpha=1.0,binarize=0.0)),  # train on TF-IDF vectors w/ Naive Bayes classifier
+])
+
+
+bernoulli_pipeline.fit(train['headlines'],train['change'])
+
+predictions = bernoulli_pipeline.predict(test['headlines'])
+
+
+print(classification_report(test['change'],predictions))
+
+
+metrics.accuracy_score(test['change'],predictions)
+
+
+
+ #pd.options.display.max_colwidth = 1000000000000000
